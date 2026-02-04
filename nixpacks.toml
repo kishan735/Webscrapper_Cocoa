@@ -1,8 +1,14 @@
+# Railway/Nixpacks configuration
+providers = ["python"]
+
 [phases.setup]
-nixPkgs = ["python311", "gcc"]
+nixPkgs = ["python311"]
 
 [phases.install]
-cmds = ["cd backend && pip install -r requirements.txt"]
+cmds = ["python3 -m pip install -r requirements.txt"]
 
 [start]
-cmd = "cd backend && python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+cmd = "cd backend && python3 -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+
+[variables]
+PYTHONUNBUFFERED = "1"
