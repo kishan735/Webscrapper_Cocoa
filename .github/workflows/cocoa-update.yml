@@ -1,0 +1,37 @@
+name: Cocoa Price Update
+
+# Run manually or on schedule
+on:
+  workflow_dispatch: {}  # Manual trigger from GitHub UI
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+
+jobs:
+  fetch-cocoa-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Fetch Cocoa Price & Generate Report
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python scripts/fetch_cocoa_report.py
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cocoa-report-${{ github.run_number }}
+          path: cocoa_report.json
