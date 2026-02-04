@@ -1,10 +1,11 @@
-"""AI-powered analyzer for generating market insights."""
+"""AI-powered analyzer using FREE APIs (Groq, Gemini, HuggingFace)."""
 
 import json
+import re
+import httpx
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import logging
-from openai import AsyncOpenAI
 
 from backend.config import get_settings
 
@@ -13,12 +14,31 @@ settings = get_settings()
 
 
 class AIAnalyzer:
-    """AI-powered analysis and consolidation of market data."""
+    """AI-powered analysis using free API providers."""
 
     def __init__(self):
-        self.client = None
+        self.providers = []
+
+        # Initialize available providers in order of preference
+        if settings.groq_api_key:
+            self.providers.append(GroqProvider(settings.groq_api_key))
+            logger.info("Groq provider initialized")
+
+        if settings.gemini_api_key:
+            self.providers.append(GeminiProvider(settings.gemini_api_key))
+            logger.info("Gemini provider initialized")
+
+        if settings.huggingface_api_key:
+            self.providers.append(HuggingFaceProvider(settings.huggingface_api_key))
+            logger.info("HuggingFace provider initialized")
+
+        # OpenAI as last resort if configured
         if settings.openai_api_key:
-            self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+            self.providers.append(OpenAIProvider(settings.openai_api_key))
+            logger.info("OpenAI provider initialized")
+
+        if not self.providers:
+            logger.warning("No AI providers configured. Using fallback analysis.")
 
         self.system_prompt = """You are an expert commodity market analyst specializing in cocoa.
 Your role is to analyze market data, news, and factors to provide clear, actionable insights.
@@ -31,6 +51,37 @@ Guidelines:
 - Always cite the factors driving your analysis
 - Express uncertainty when data is limited"""
 
+    async def _call_ai(self, prompt: str, max_tokens: int = 1000) -> Optional[str]:
+        """Try each provider until one succeeds."""
+        for provider in self.providers:
+            try:
+                result = await provider.generate(self.system_prompt, prompt, max_tokens)
+                if result:
+                    return result
+            except Exception as e:
+                logger.warning(f"{provider.name} failed: {e}")
+                continue
+        return None
+
+    def _extract_json(self, text: str) -> Dict[str, Any]:
+        """Extract JSON from AI response text."""
+        if not text:
+            return {}
+
+        # Try to find JSON block in response
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if json_match:
+            try:
+                return json.loads(json_match.group())
+            except json.JSONDecodeError:
+                pass
+
+        # Try parsing the whole response
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+
     async def generate_market_overview(
         self,
         current_price: float,
@@ -40,12 +91,11 @@ Guidelines:
     ) -> Dict[str, Any]:
         """Generate comprehensive market overview."""
 
-        if not self.client:
+        if not self.providers:
             return self._generate_fallback_overview(
                 current_price, price_changes, recent_news, market_factors
             )
 
-        # Prepare context
         news_summary = self._summarize_news(recent_news[:10])
         factors_summary = self._summarize_factors(market_factors)
 
@@ -73,27 +123,21 @@ Provide analysis in the following JSON format:
     "price_drivers": ["list of main factors driving current prices"],
     "sentiment": "bullish/bearish/neutral",
     "confidence": 0.0-1.0
-}}"""
+}}
+
+Respond ONLY with the JSON, no other text."""
 
         try:
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1000,
-            )
-
-            result = response.choices[0].message.content
-            return json.loads(result)
-
+            result = await self._call_ai(prompt)
+            parsed = self._extract_json(result)
+            if parsed and "market_summary" in parsed:
+                return parsed
         except Exception as e:
             logger.error(f"AI overview generation failed: {e}")
-            return self._generate_fallback_overview(
-                current_price, price_changes, recent_news, market_factors
-            )
+
+        return self._generate_fallback_overview(
+            current_price, price_changes, recent_news, market_factors
+        )
 
     async def generate_market_outlook(
         self,
@@ -103,7 +147,7 @@ Provide analysis in the following JSON format:
     ) -> Dict[str, Any]:
         """Generate forward-looking market outlook."""
 
-        if not self.client:
+        if not self.providers:
             return self._generate_fallback_outlook(market_factors)
 
         factors_summary = self._summarize_factors(market_factors)
@@ -125,34 +169,28 @@ Provide outlook in the following JSON format:
     "opportunities": ["list of potential opportunities"],
     "short_term_bias": "bullish/bearish/neutral",
     "medium_term_bias": "bullish/bearish/neutral"
-}}"""
+}}
+
+Respond ONLY with the JSON, no other text."""
 
         try:
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.4,
-                max_tokens=1000,
-            )
-
-            result = response.choices[0].message.content
-            return json.loads(result)
-
+            result = await self._call_ai(prompt)
+            parsed = self._extract_json(result)
+            if parsed and "outlook_summary" in parsed:
+                return parsed
         except Exception as e:
             logger.error(f"AI outlook generation failed: {e}")
-            return self._generate_fallback_outlook(market_factors)
+
+        return self._generate_fallback_outlook(market_factors)
 
     async def analyze_news_impact(
         self, news_article: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Analyze potential price impact of a news article."""
 
-        if not self.client:
+        if not self.providers:
             return {
-                "impact_assessment": "Analysis unavailable",
+                "impact_assessment": "Analysis unavailable - no AI provider configured",
                 "price_impact": "neutral",
                 "confidence": 0.5,
             }
@@ -170,29 +208,23 @@ Provide analysis in JSON format:
     "magnitude": "low/medium/high",
     "confidence": 0.0-1.0,
     "affected_factors": ["list of affected market factors"]
-}}"""
+}}
+
+Respond ONLY with the JSON, no other text."""
 
         try:
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=500,
-            )
-
-            result = response.choices[0].message.content
-            return json.loads(result)
-
+            result = await self._call_ai(prompt, max_tokens=500)
+            parsed = self._extract_json(result)
+            if parsed and "impact_assessment" in parsed:
+                return parsed
         except Exception as e:
             logger.error(f"AI news analysis failed: {e}")
-            return {
-                "impact_assessment": "Analysis unavailable",
-                "price_impact": "neutral",
-                "confidence": 0.5,
-            }
+
+        return {
+            "impact_assessment": "Analysis unavailable",
+            "price_impact": "neutral",
+            "confidence": 0.5,
+        }
 
     async def generate_daily_digest(
         self,
@@ -202,7 +234,7 @@ Provide analysis in JSON format:
     ) -> str:
         """Generate a daily market digest."""
 
-        if not self.client:
+        if not self.providers:
             return self._generate_fallback_digest(price_data, news_articles)
 
         news_summary = self._summarize_news(news_articles[:5])
@@ -220,24 +252,17 @@ Write a 150-200 word market digest covering:
 1. Current price action
 2. Key news and developments
 3. What to watch today
-Keep it professional and actionable."""
+
+Keep it professional and actionable. Do not use markdown formatting."""
 
         try:
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.5,
-                max_tokens=400,
-            )
-
-            return response.choices[0].message.content
-
+            result = await self._call_ai(prompt, max_tokens=400)
+            if result:
+                return result
         except Exception as e:
             logger.error(f"AI digest generation failed: {e}")
-            return self._generate_fallback_digest(price_data, news_articles)
+
+        return self._generate_fallback_digest(price_data, news_articles)
 
     def _summarize_news(self, news_articles: List[Dict[str, Any]]) -> str:
         """Create text summary of news articles."""
@@ -278,7 +303,6 @@ Keep it professional and actionable."""
         change_24h = price_changes.get("24h", 0)
         trend = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
 
-        # Count sentiment from news
         positive = sum(1 for n in recent_news if n.get("sentiment") == "positive")
         negative = sum(1 for n in recent_news if n.get("sentiment") == "negative")
 
@@ -331,3 +355,145 @@ TOP HEADLINES:
 
         digest += "\nStay informed and trade wisely."
         return digest
+
+
+# ============================================================================
+# AI PROVIDER IMPLEMENTATIONS
+# ============================================================================
+
+class BaseProvider:
+    """Base class for AI providers."""
+    name = "base"
+
+    async def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+        raise NotImplementedError
+
+
+class GroqProvider(BaseProvider):
+    """Groq API provider - FREE tier with Llama 3.3 70B."""
+    name = "Groq"
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.groq.com/openai/v1/chat/completions"
+
+    async def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.3-70b-versatile",  # Free, fast, powerful
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": max_tokens,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+
+
+class GeminiProvider(BaseProvider):
+    """Google Gemini API provider - FREE tier available."""
+    name = "Gemini"
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+
+    async def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.base_url}?key={self.api_key}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": f"{system_prompt}\n\n{user_prompt}"}
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.3,
+                        "maxOutputTokens": max_tokens,
+                    },
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+class HuggingFaceProvider(BaseProvider):
+    """HuggingFace Inference API - FREE tier available."""
+    name = "HuggingFace"
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        # Using Mistral-7B-Instruct which is free
+        self.base_url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+
+    async def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            prompt = f"<s>[INST] {system_prompt}\n\n{user_prompt} [/INST]"
+
+            response = await client.post(
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "inputs": prompt,
+                    "parameters": {
+                        "max_new_tokens": max_tokens,
+                        "temperature": 0.3,
+                        "return_full_text": False,
+                    },
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if isinstance(data, list) and len(data) > 0:
+                return data[0].get("generated_text", "")
+            return None
+
+
+class OpenAIProvider(BaseProvider):
+    """OpenAI API provider (paid, as fallback)."""
+    name = "OpenAI"
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.openai.com/v1/chat/completions"
+
+    async def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": max_tokens,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]

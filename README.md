@@ -7,7 +7,7 @@ A real-time commodity price tracking application focused on cocoa, providing pri
 - **Real-time Price Tracking**: Live cocoa prices from multiple sources (ICE Futures)
 - **News Aggregation**: Automated collection of cocoa-related news from RSS feeds and web sources
 - **Importance Analysis**: Scoring system for news and market factors based on their potential price impact
-- **AI-Powered Analysis**: Market overview, outlook, and daily digests powered by OpenAI
+- **AI-Powered Analysis**: Market overview, outlook, and daily digests using FREE AI APIs (Groq, Gemini, HuggingFace)
 - **Technical Indicators**: 52-week high/low, price changes, trend analysis
 - **PWA Support**: Installable progressive web app for mobile access
 
@@ -53,8 +53,9 @@ pip install -r requirements.txt
 # Copy environment configuration
 cp .env.example .env
 
-# Edit .env and add your OpenAI API key (optional, for AI features)
-# OPENAI_API_KEY=your_key_here
+# Edit .env and add a FREE AI API key (for AI-powered analysis)
+# Recommended: Get a free Groq key at https://console.groq.com/keys
+# GROQ_API_KEY=your_free_key_here
 
 # Create data directory
 mkdir -p ../data
@@ -102,7 +103,8 @@ The application will be available at:
 
 ## Data Sources
 
-### Price Data
+### Price Data (all FREE, no API key needed)
+- **Yahoo Finance** (via yfinance) - Primary, most reliable
 - Trading Economics
 - Investing.com
 - Business Insider Markets
@@ -114,11 +116,25 @@ The application will be available at:
 
 ## Configuration
 
-Environment variables (`.env`):
+### FREE AI API Keys (choose at least one)
+
+The application supports multiple FREE AI providers. Get your API key from any of these:
+
+| Provider | Free Tier | Get Key |
+|----------|-----------|---------|
+| **Groq** (Recommended) | 30 req/min, 6000 req/day | [console.groq.com/keys](https://console.groq.com/keys) |
+| **Google Gemini** | 15 req/min, 1500 req/day | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **HuggingFace** | Rate-limited, generous | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| OpenAI (paid) | Pay-per-use | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+
+### Environment Variables (`.env`)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key for AI analysis | - |
+| `GROQ_API_KEY` | Groq API key (FREE) | - |
+| `GEMINI_API_KEY` | Google Gemini API key (FREE) | - |
+| `HUGGINGFACE_API_KEY` | HuggingFace API key (FREE) | - |
+| `OPENAI_API_KEY` | OpenAI API key (paid fallback) | - |
 | `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///./data/cocoa_tracker.db` |
 | `SCRAPE_INTERVAL_MINUTES` | Auto-scrape interval | `30` |
 | `NEWS_FETCH_LIMIT` | Max news articles per scrape | `50` |

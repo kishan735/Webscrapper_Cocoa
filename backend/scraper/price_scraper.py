@@ -1,18 +1,22 @@
-"""Price scraper for cocoa commodity prices."""
+"""Price scraper for cocoa commodity prices using FREE data sources."""
 
 import asyncio
 import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor
 import httpx
 from bs4 import BeautifulSoup
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Thread pool for running sync yfinance calls
+_executor = ThreadPoolExecutor(max_workers=2)
+
 
 class PriceScraper:
-    """Scraper for cocoa price data from multiple sources."""
+    """Scraper for cocoa price data from multiple FREE sources."""
 
     def __init__(self):
         self.headers = {
@@ -23,8 +27,9 @@ class PriceScraper:
         self.timeout = httpx.Timeout(30.0)
 
     async def get_current_price(self) -> Optional[Dict[str, Any]]:
-        """Get current cocoa price from multiple sources and return best result."""
+        """Get current cocoa price from multiple FREE sources."""
         results = await asyncio.gather(
+            self._get_yfinance_price(),  # FREE & reliable
             self._scrape_trading_economics(),
             self._scrape_investing_com(),
             self._scrape_business_insider(),
@@ -37,6 +42,56 @@ class PriceScraper:
 
         logger.error("Failed to fetch cocoa price from all sources")
         return None
+
+    async def _get_yfinance_price(self) -> Optional[Dict[str, Any]]:
+        """Get cocoa price using yfinance (FREE, no API key needed)."""
+        try:
+            import yfinance as yf
+
+            # Run yfinance in thread pool (it's synchronous)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                _executor,
+                self._fetch_yfinance_data
+            )
+            return result
+        except ImportError:
+            logger.warning("yfinance not installed, skipping")
+            return None
+        except Exception as e:
+            logger.warning(f"yfinance fetch failed: {e}")
+            return None
+
+    def _fetch_yfinance_data(self) -> Optional[Dict[str, Any]]:
+        """Synchronous yfinance data fetch."""
+        import yfinance as yf
+
+        # CC=F is the cocoa futures ticker on Yahoo Finance
+        ticker = yf.Ticker("CC=F")
+        hist = ticker.history(period="5d")
+
+        if hist.empty:
+            return None
+
+        current_price = float(hist["Close"].iloc[-1])
+        prev_price = float(hist["Close"].iloc[-2]) if len(hist) > 1 else current_price
+
+        change_24h = current_price - prev_price
+
+        # Get 52-week data
+        hist_year = ticker.history(period="1y")
+        high_52 = float(hist_year["High"].max()) if not hist_year.empty else None
+        low_52 = float(hist_year["Low"].min()) if not hist_year.empty else None
+
+        return {
+            "price_usd": current_price,
+            "price_change_24h": change_24h,
+            "high_52_week": high_52,
+            "low_52_week": low_52,
+            "source": "Yahoo Finance",
+            "market": "ICE",
+            "timestamp": datetime.utcnow(),
+        }
 
     async def _scrape_trading_economics(self) -> Optional[Dict[str, Any]]:
         """Scrape cocoa price from Trading Economics."""

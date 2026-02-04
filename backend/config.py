@@ -7,8 +7,11 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # API Keys
-    openai_api_key: str = ""
+    # AI API Keys (in order of preference - all have FREE tiers!)
+    groq_api_key: str = ""  # FREE: https://console.groq.com/keys
+    gemini_api_key: str = ""  # FREE: https://aistudio.google.com/apikey
+    huggingface_api_key: str = ""  # FREE: https://huggingface.co/settings/tokens
+    openai_api_key: str = ""  # Paid fallback
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/cocoa_tracker.db"
